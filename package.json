@@ -1,0 +1,12 @@
+{
+  "name": "aileethub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension that pushes accepted LeetCode solutions to GitHub with Groq-written explanations.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "icons": "node tools/make-icons.mjs",
+    "package": "node tools/package.mjs"
+  }
+}

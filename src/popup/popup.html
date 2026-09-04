@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AILeetHub</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true"></div>
+
+    <header class="bar">
+      <div class="brand">
+        <div class="mark">AI</div>
+        <div class="brand__text">
+          <strong>AILeetHub</strong>
+          <span id="repo-label">Not connected</span>
+        </div>
+      </div>
+      <button id="open-settings" class="icon-btn" type="button" title="Settings" aria-label="Settings">⚙</button>
+    </header>
+
+    <!-- Shown until a GitHub repo is configured. -->
+    <section id="setup" class="panel setup" hidden>
+      <p>Connect a GitHub repository to start syncing accepted solutions.</p>
+      <button id="setup-cta" class="btn btn--primary" type="button">Open setup</button>
+    </section>
+
+    <main id="dashboard" hidden>
+      <section class="stats">
+        <div class="stat">
+          <span class="stat__value" id="stat-streak">0</span>
+          <span class="stat__label">Day streak</span>
+        </div>
+        <div class="stat">
+          <span class="stat__value" id="stat-total">0</span>
+          <span class="stat__label">Synced</span>
+        </div>
+        <div class="stat">
+          <span class="stat__value" id="stat-best">0</span>
+          <span class="stat__label">Best streak</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Difficulty</h2>
+        <div class="bars" id="difficulty"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Activity</h2>
+        <div class="heatmap" id="heatmap"></div>
+        <div class="legend">
+          <span>Less</span>
+          <i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i>
+          <span>More</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Recent</h2>
+        <ul class="recent" id="recent"></ul>
+      </section>
+    </main>
+
+    <footer class="bar bar--footer">
+      <label class="switch">
+        <input id="toggle-enabled" type="checkbox" />
+        <span class="switch__track"><span class="switch__thumb"></span></span>
+        <span class="switch__label">Auto-sync</span>
+      </label>
+      <a id="repo-link" class="repo-link" target="_blank" rel="noreferrer" hidden>Open repo ↗</a>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
