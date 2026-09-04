@@ -39,25 +39,20 @@ extension talks to exactly three hosts: `leetcode.com`, `api.github.com`, `api.g
 
 ## Screenshots & demo
 
-<!--
-  Filenames match screenshots/README.md exactly — drop the real captures in
-  and these render automatically, no other edits needed.
--->
+The four-step options flow, end to end — connect GitHub, verify Groq and pick a model,
+set preferences, then optionally backfill your whole solved history:
 
-| Live sync | Dashboard |
+| 1. GitHub | 2. Groq |
 | --- | --- |
-| ![Accepted toast with commit link](screenshots/sync-toast.gif) | ![Popup dashboard: streak, heatmap, recent syncs](screenshots/popup-dashboard.png) |
+| ![Options page GitHub panel — token connected, repo selected](screenshots/options-github.png) | ![Options page Groq panel — key verified, model picker](screenshots/options-groq.png) |
 
-| GitHub setup | Groq model picker |
+| 3. Preferences | 4. Import history |
 | --- | --- |
-| ![Options page GitHub panel](screenshots/options-github.png) | ![Options page Groq panel](screenshots/options-groq.png) |
+| ![Options page Preferences panel — sync, AI READMEs, index, focus mode, folder layout](screenshots/options-preferences.png) | ![Options page Import panel — 267 problems imported](screenshots/options-import.png) |
 
-| History import | Generated problem README |
-| --- | --- |
-| ![Backfill progress bar with pause/resume](screenshots/backfill-progress.gif) | ![AI-written README with Intuition, Approach, Complexity](screenshots/problem-readme.png) |
-
-> Capturing your own? See [`screenshots/README.md`](screenshots/README.md) for the
-> exact filenames and a couple of tools that make this quick on Windows.
+> More welcome: the live "Accepted" toast, the popup dashboard, and a generated
+> per-problem README. See [`screenshots/README.md`](screenshots/README.md) for exact
+> filenames if you'd like to add them.
 
 ## Install
 
