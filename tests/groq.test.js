@@ -27,15 +27,10 @@ test('picks are ordered best first and capped at the curated set', () => {
 
   assert.deepEqual(
     picks.map((pick) => pick.id),
-    ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3-32b'],
-    'listing order must not affect ranking',
+    ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+    'listing order must not affect ranking, and only GPT OSS is curated',
   );
   assert.ok(picks.every((pick) => pick.label && pick.blurb));
-});
-
-test('a family resolves to its newest member', () => {
-  const picks = recommendedModels(ids(['qwen/qwen3.6-27b', 'qwen/qwen3.8-27b']));
-  assert.equal(picks.at(-1).id, 'qwen/qwen3.8-27b');
 });
 
 test('unavailable picks are dropped rather than offered', () => {

@@ -16,8 +16,11 @@ export const DEFAULT_MODEL = 'openai/gpt-oss-120b';
  *
  * Matched against the live /models response rather than hard-coded as IDs: Groq
  * renames and retires models, and a pick that resolves to nothing is hidden instead
- * of failing at generation time. `preferLatest` takes the highest-sorting match so
- * a family (Qwen 3.6 / 3.8) resolves to its newest member.
+ * of failing at generation time.
+ *
+ * Only the open-weight GPT OSS pair is offered: everything else Groq serves is
+ * either enterprise-gated or too small to write a reliable complexity analysis.
+ * The full account listing is still one click away under "Use a different model".
  */
 export const RECOMMENDED = [
   {
@@ -29,12 +32,6 @@ export const RECOMMENDED = [
     match: /gpt-oss-20b/i,
     label: 'GPT OSS 20B',
     blurb: 'Noticeably faster and lighter on rate limits. Good enough for most write-ups.',
-  },
-  {
-    match: /qwen-?3/i,
-    label: 'Qwen 3',
-    blurb: 'Alternative reasoning model — a useful second opinion on tricky solutions.',
-    preferLatest: true,
   },
 ];
 
@@ -48,11 +45,7 @@ export function recommendedModels(models) {
       .filter((model) => !picks.some((pick) => pick.id === model.id));
     if (!matches.length) continue;
 
-    const chosen = entry.preferLatest
-      ? [...matches].sort((a, b) => a.id.localeCompare(b.id)).at(-1)
-      : matches[0];
-
-    picks.push({ id: chosen.id, label: entry.label, blurb: entry.blurb });
+    picks.push({ id: matches[0].id, label: entry.label, blurb: entry.blurb });
   }
 
   return picks;

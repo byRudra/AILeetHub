@@ -119,7 +119,7 @@ async function connectGitHub(token, { silent = false } = {}) {
 }
 
 /**
- * Renders the top-3 quick picks. The <select> below stays the single source of
+ * Renders the curated quick picks. The <select> below stays the single source of
  * truth for the chosen model; these radios just drive it.
  */
 function renderModelPicks(models, selected) {

@@ -88,7 +88,6 @@ and click *Verify*, then pick a model:
 | --- | --- |
 | **GPT OSS 120B** *(default)* | Best quality. Strongest reasoning, so the complexity analysis is the most reliable. |
 | **GPT OSS 20B** | Noticeably faster and lighter on rate limits. Fine for most write-ups. |
-| **Qwen 3** | Alternative reasoning model — a useful second opinion on tricky solutions. |
 
 Every other chat model on your account is available under *Use a different model*. The
 list is resolved live against Groq's API, so a retired model ID never leaves a dead

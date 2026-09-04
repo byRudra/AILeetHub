@@ -191,8 +191,10 @@ CSP forbids inline scripts and remote resources on extension pages: no CDN, no i
 Groq is OpenAI-compatible at `https://api.groq.com/openai/v1`. Model IDs are retired
 often, so nothing hard-codes a menu: `RECOMMENDED` holds regex matchers plus copy, and
 `recommendedModels()` resolves them against the live `/models` response, dropping picks
-that match nothing and taking the highest-sorting match for a family (`preferLatest`).
-The options page shows the top three as radio cards with the full list behind a
+that match nothing. Only the open-weight GPT OSS pair is curated — the rest of Groq's
+catalogue is enterprise-gated or too small for a trustworthy complexity analysis, and
+the full account listing stays reachable under "Use a different model".
+The options page shows the curated picks as radio cards with the full list behind a
 disclosure; the `<select>` remains the single source of truth and the radios just set it.
 
 `DEFAULT_MODEL` (`openai/gpt-oss-120b`) only seeds a fresh install. A saved-but-delisted
