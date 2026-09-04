@@ -156,7 +156,8 @@ export async function getFileText(token, owner, repo, path, branch) {
     if (!file?.content) return null;
     return fromBase64(file.content);
   } catch (error) {
-    if (error.status === 404) return null;
+    // 404 = no such file; 409 = repository has no commits at all.
+    if (error.status === 404 || error.status === 409) return null;
     throw error;
   }
 }
@@ -176,6 +177,40 @@ export async function resolveHead(token, owner, repo, branch) {
     if (error.status === 404 || error.status === 409) return { commitSha: null, treeSha: null };
     throw error;
   }
+}
+
+/**
+ * Guarantees the branch has at least one commit, and returns its tip.
+ *
+ * GitHub's Git Data API refuses every write on a repository with no commits —
+ * blobs, trees and commits all come back `409 Git Repository is empty.` The
+ * contents API is the only way to create that first commit, so an empty repo is
+ * bootstrapped with a single file and the normal path takes over from there.
+ *
+ * `author` backdates the bootstrap commit too, so importing a history into a fresh
+ * repo does not leave one stray present-day commit at the root of it.
+ */
+export async function ensureBranch(token, { owner, repo, branch, author }) {
+  const head = await resolveHead(token, owner, repo, branch);
+  if (head.commitSha) return head;
+
+  await request(token, `/repos/${owner}/${repo}/contents/README.md`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      message: 'Initialise repository',
+      content: toBase64('# LeetCode Solutions\n\n_Synced by AILeetHub._\n'),
+      // `branch` is deliberately omitted: on an empty repo the branch does not
+      // exist yet, and GitHub rejects a ref it cannot find. This creates the
+      // repository's default branch, which is the one we are configured for.
+      ...(author ? { author, committer: author } : {}),
+    }),
+  });
+
+  const created = await resolveHead(token, owner, repo, branch);
+  if (!created.commitSha) {
+    throw new GitHubError('Initialised the repository but could not read it back.', 409);
+  }
+  return created;
 }
 
 /**
@@ -260,7 +295,7 @@ export function commitUrl(owner, repo, sha) {
  * backfill drives resolveHead/createCommit/setRef itself so it can chain commits.
  */
 export async function commitFiles(token, { owner, repo, branch, message, files, author }) {
-  const head = await resolveHead(token, owner, repo, branch);
+  const head = await ensureBranch(token, { owner, repo, branch, author });
 
   const commit = await createCommit(token, {
     owner,
@@ -272,7 +307,7 @@ export async function commitFiles(token, { owner, repo, branch, message, files, 
     baseTreeSha: head.treeSha,
   });
 
-  await setRef(token, { owner, repo, branch, sha: commit.sha, create: !head.commitSha });
+  await setRef(token, { owner, repo, branch, sha: commit.sha, create: false });
 
   return { sha: commit.sha, treeSha: commit.treeSha, htmlUrl: commitUrl(owner, repo, commit.sha) };
 }

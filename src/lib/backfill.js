@@ -410,7 +410,11 @@ async function pushStep() {
     // We know where HEAD is after our own commit, so re-reading the ref every
     // iteration is two wasted calls per problem. It is only resolved when the
     // cache is cold (first item, or after the worker restarted) or invalidated.
-    const head = cachedHead || (await github.resolveHead(token, owner, repo, branch));
+    const author = await authorFor(token, item.timestamp);
+    // ensureBranch also bootstraps a repository that has no commits yet, which the
+    // Git Data API cannot do on its own.
+    const head =
+      cachedHead || (await github.ensureBranch(token, { owner, repo, branch, author }));
 
     const commit = await github.createCommit(token, {
       owner,
@@ -420,20 +424,14 @@ async function pushStep() {
         { path: paths.solution, content: submission.code },
         { path: paths.readme, content: buildProblemReadme(submission, explanation) },
       ],
-      author: await authorFor(token, item.timestamp),
+      author,
       parentSha: head.commitSha,
       baseTreeSha: head.treeSha,
     });
 
     // The ref moves after every problem rather than once at the end: an interrupted
     // run then resumes against real history instead of orphaning its commits.
-    await github.setRef(token, {
-      owner,
-      repo,
-      branch,
-      sha: commit.sha,
-      create: !head.commitSha,
-    });
+    await github.setRef(token, { owner, repo, branch, sha: commit.sha, create: false });
 
     cachedHead = { commitSha: commit.sha, treeSha: commit.treeSha };
 
@@ -480,7 +478,7 @@ async function finish() {
       await setMessage('Updating repository index…');
       const { token, owner, repo, branch } = config.github;
       const existing = await github.getFileText(token, owner, repo, 'README.md', branch);
-      const head = await github.resolveHead(token, owner, repo, branch);
+      const head = await github.ensureBranch(token, { owner, repo, branch });
 
       const commit = await github.createCommit(token, {
         owner,
@@ -492,7 +490,7 @@ async function finish() {
         baseTreeSha: head.treeSha,
       });
 
-      await github.setRef(token, { owner, repo, branch, sha: commit.sha, create: !head.commitSha });
+      await github.setRef(token, { owner, repo, branch, sha: commit.sha, create: false });
     } catch (error) {
       console.warn('[AILeetHub] index update after backfill failed:', error.message);
     }

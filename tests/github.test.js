@@ -7,7 +7,14 @@
 import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createCommit, commitFiles, resolveHead, resolveAuthor } from '../src/lib/github.js';
+import {
+  createCommit,
+  commitFiles,
+  resolveHead,
+  resolveAuthor,
+  ensureBranch,
+  getFileText,
+} from '../src/lib/github.js';
 
 const realFetch = globalThis.fetch;
 let calls = [];
@@ -104,30 +111,74 @@ test('resolveHead reports an empty repo instead of throwing', async () => {
   });
 });
 
-test('commitFiles creates the ref on an empty repo and patches it otherwise', async () => {
-  stubFetch({
-    '/git/ref/heads/main': { __status: 404 },
-    '/git/blobs': { sha: 'blob1' },
-    '/git/trees': { sha: 'tree1' },
-    '/git/commits': { sha: 'commit1' },
-    '/git/refs': { ref: 'refs/heads/main' },
-  });
-  await commitFiles('tok', { owner: 'o', repo: 'r', branch: 'main', message: 'm', files });
-  const refCall = calls.at(-1);
-  assert.equal(refCall.method, 'POST', 'empty repo needs the ref created');
-  assert.equal(refCall.body.ref, 'refs/heads/main');
-
-  calls = [];
+test('commitFiles fast-forwards a branch that already has commits', async () => {
   stubFetch({
     '/git/ref/heads/main': { object: { sha: 'head1' } },
     '/git/commits/head1': { tree: { sha: 'tree0' } },
-    '/git/blobs': { sha: 'blob1' },
     '/git/trees': { sha: 'tree1' },
     '/git/commits': { sha: 'commit1' },
     '/git/refs/heads/main': { ref: 'refs/heads/main' },
   });
+
   await commitFiles('tok', { owner: 'o', repo: 'r', branch: 'main', message: 'm', files });
-  assert.equal(calls.at(-1).method, 'PATCH', 'existing branch is fast-forwarded');
+
+  assert.equal(calls.at(-1).method, 'PATCH');
+  assert.equal(
+    calls.some((call) => call.url.includes('/contents/')),
+    false,
+    'a populated repo must not be bootstrapped',
+  );
+});
+
+test('an empty repo is bootstrapped through the contents API', async () => {
+  // GitHub answers every Git Data write on a repo with no commits with 409
+  // "Git Repository is empty.", so the first commit has to go through /contents.
+  let initialised = false;
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null });
+
+    const reply = (status, body) => ({
+      ok: status < 300,
+      status,
+      headers: { get: () => null },
+      json: async () => body,
+    });
+
+    if (url.includes('/contents/README.md') && options.method === 'PUT') {
+      initialised = true;
+      return reply(201, { commit: { sha: 'boot1' } });
+    }
+    if (url.includes('/git/ref/heads/main')) {
+      return initialised
+        ? reply(200, { object: { sha: 'boot1' } })
+        : reply(409, { message: 'Git Repository is empty.' });
+    }
+    if (url.includes('/git/commits/boot1')) return reply(200, { tree: { sha: 'boottree' } });
+    if (url.includes('/git/trees')) return reply(201, { sha: 'tree1' });
+    if (url.includes('/git/commits')) return reply(201, { sha: 'commit1' });
+    if (url.includes('/git/refs/heads/main')) return reply(200, {});
+    throw new Error(`unstubbed: ${url}`);
+  };
+
+  const author = { name: 'Ada', email: 'ada@example.com', date: '2021-05-02T10:00:00.000Z' };
+  const head = await ensureBranch('tok', { owner: 'o', repo: 'r', branch: 'main', author });
+
+  const put = calls.find((call) => call.method === 'PUT');
+  assert.ok(put, 'the bootstrap commit must be created');
+  assert.deepEqual(put.body.author, author, 'bootstrap is backdated too');
+  assert.equal('branch' in put.body, false, 'the branch does not exist yet on an empty repo');
+  assert.deepEqual(head, { commitSha: 'boot1', treeSha: 'boottree' });
+
+  // And the normal commit path now works against it.
+  calls = [];
+  await commitFiles('tok', { owner: 'o', repo: 'r', branch: 'main', message: 'm', files });
+  assert.equal(calls.some((call) => call.method === 'PUT'), false, 'bootstrapped only once');
+  assert.equal(calls.at(-1).method, 'PATCH');
+});
+
+test('reading a file from an empty repo returns null rather than throwing', async () => {
+  stubFetch({ '/contents/README.md': { __status: 409, message: 'Git Repository is empty.' } });
+  assert.equal(await getFileText('tok', 'o', 'r', 'README.md', 'main'), null);
 });
 
 test('resolveAuthor prefers the public email', async () => {
