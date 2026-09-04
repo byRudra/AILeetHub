@@ -42,17 +42,35 @@ Service worker (module)         service-worker.js  live sync
 Every call carrying a secret happens in the service worker. Keep it that way — do not
 move `github.js` or `groq.js` calls into `src/content/`.
 
-### Detection (`src/content/interceptor.js`)
+### Detection (`src/content/interceptor.js` + the poll in `bridge.js`)
 
-LeetCode polls `GET /submissions/detail/<id>/check/` until the judge returns
-`state === "SUCCESS"`. That response is the only reliable "accepted" signal, so the
-interceptor monkey-patches `window.fetch` and `XMLHttpRequest.prototype.open` in the
-page's own world (`"world": "MAIN"`, `run_at: document_start` — it must patch before
-the page's first call). It has no `chrome.*` access and must stay a plain script with
-no imports.
+The interceptor monkey-patches `window.fetch` and `XMLHttpRequest.prototype.open`/`send`
+in the page's own world (`"world": "MAIN"`, `run_at: document_start` — it must patch
+before the page's first call). It has no `chrome.*` access and must stay a plain script
+with no imports.
 
-**If syncing silently stops working, this file is almost always the cause.** It is the
-one place coupled to LeetCode's private API.
+**Detection is deliberately redundant, because LeetCode has moved the result panel
+between transports before and single-signal detection died silently when it did.** Three
+signals go over one `window.postMessage` channel:
+
+| Signal | Source | Role |
+| --- | --- | --- |
+| `submitted` | `POST …/submit/` → `submission_id` | **Load-bearing.** Fires on the request that *starts* every submission |
+| `accepted` | `GET /submissions/detail/<id>/check/` → `SUCCESS` + `status_code 10` | Fast path |
+| `accepted` | `POST /graphql/` `submissionDetails` → `statusCode 10` | Fast path |
+
+`submitted` carries no verdict, so `bridge.js` polls the judge itself (`waitForVerdict`,
+same-origin so the session cookie applies) and pushes only on an accept. That is what
+makes detection survive a transport change: any future result mechanism still starts
+with a `/submit/` call. The fast paths only skip the polling when they happen to fire.
+A rejected submission and a poll timeout are both **silent** — no toast.
+
+`bridge.js` also carries a DOM fallback for the case where interception sees nothing at
+all: `[data-e2e-locator="submission-result"]` reading "Accepted" recovers the id from
+`questionSubmissionList`. It waits 4s first so the interceptor, which knows the exact id,
+wins. Dedupe across all four routes is the `handled`/`inFlight` pair keyed by submission id.
+
+Set `localStorage['ailh:debug'] = '1'` on leetcode.com to trace both scripts.
 
 ### Enrichment (`src/content/bridge.js`)
 

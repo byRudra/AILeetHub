@@ -13,6 +13,11 @@
 
 * { box-sizing: border-box; }
 
+/* `display` rules below (e.g. `.setup`, `main`) are author-origin and would
+   otherwise beat the user-agent's `[hidden] { display: none }`, since author
+   styles always win over UA styles regardless of specificity. */
+[hidden] { display: none !important; }
+
 body {
   width: 360px;
   margin: 0;

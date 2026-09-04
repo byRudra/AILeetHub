@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AILeetHub",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Push accepted LeetCode solutions to GitHub with Groq-generated README explanations, organized by DSA topic.",
   "minimum_chrome_version": "111",
   "icons": {
