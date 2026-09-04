@@ -93,9 +93,29 @@ time**. Four things here are load-bearing:
 
 `mergeSubmissionPage` and `orderQueue` are pure and tested — they decide which
 submission represents a problem (first accept = when you solved it) and the
-oldest-first order. Per-problem failures are recorded in `failed` and skipped; only
-401/403/404 from GitHub abort the run, since those would fail identically for every
-remaining item.
+oldest-first order.
+
+**Failure handling is three-way, and the distinction is the whole design.** Getting it
+wrong on a 600-problem history throws away the run:
+
+| Class | Response | Why |
+| --- | --- | --- |
+| Auth (`AuthPause`) | Pause, focus the tab, **do not advance the cursor** | Recoverable and affects every remaining item |
+| Throttle | Retry with backoff, widen `pace` permanently | LeetCode's tolerance varies; staying slow beats retrying |
+| Per-problem | Record in `failed`, advance | One bad problem shouldn't stop the run |
+| GitHub 401/403/404 | Stop the run | Will fail identically for everything left |
+
+`bridge.js` classifies before backfill reacts (`classify()`): LeetCode overloads 403 for
+both throttling and logout, and answers a logged-out API call with an **HTML login
+redirect**, not a status code — so a bare 403 is read as throttling and an HTML body as
+auth. Never collapse these back into "session expired"; that misreport is what made a
+throttled run look like repeated logouts.
+
+**Request budget matters here.** Per problem it is 1 LeetCode call (the scan captures
+`code` from the dump when present, skipping `submissionDetails`) and 3 GitHub calls
+(inline tree content instead of blob uploads, plus `cachedHead` avoiding a HEAD
+re-resolve). That is down from 2 and 7. Anything that reintroduces a per-problem round
+trip will bring the throttling back.
 
 ### Repo writes (`src/lib/github.js`)
 
@@ -177,4 +197,6 @@ pins the README section structure (`## Intuition`, `## Approach`, `## Complexity
   are right, no `web_accessible_resources` leak
 
 Anything touching `chrome.*` (tab proxying, alarms, storage) is untested — verify by
-loading the extension.
+loading the extension. `classify()` in `bridge.js` is also untested: it lives inside a
+content-script IIFE and is not importable. If it needs changing, lift it into `lib/`
+first.

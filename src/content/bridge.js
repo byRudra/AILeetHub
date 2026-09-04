@@ -68,31 +68,83 @@
    * Requests from this content script run in the page's origin and carry it, so
    * backfill routes every LeetCode call through here.
    */
+  /**
+   * Sorts a failed LeetCode response into 'auth' or 'throttle'.
+   *
+   * This distinction decides whether a backfill pauses for the user or simply
+   * waits, so guessing is expensive. LeetCode overloads 403 for both a missing
+   * session and aggressive paging, and it answers a logged-out API call with an
+   * HTML login redirect rather than a status code — hence the body sniffing.
+   */
+  function classify(response, bodyText) {
+    if (response.redirected && /\/accounts\/login/.test(response.url)) return 'auth';
+    if (response.status === 401) return 'auth';
+    if (response.status === 429) return 'throttle';
+
+    const body = String(bodyText || '');
+    if (response.status === 403) {
+      if (/too many|rate|throttl|slow down/i.test(body)) return 'throttle';
+      if (/login|signin|sign in|authenticat|permission/i.test(body)) return 'auth';
+      // Bare 403 during a long run is far more often throttling than logout.
+      return 'throttle';
+    }
+    if (response.status >= 500) return 'throttle';
+
+    // An HTML body where JSON was expected means we were bounced to a login or
+    // challenge page.
+    if (/^\s*<(?:!doctype|html)/i.test(body)) return 'auth';
+    return 'http';
+  }
+
+  const MESSAGES = {
+    auth: 'LeetCode session expired — sign in again, then resume.',
+    throttle: 'LeetCode is rate limiting requests.',
+  };
+
   async function leetcodeFetch(message) {
     try {
-      if (message.graphql) {
-        const data = await graphql(message.graphql.query, message.graphql.variables);
-        return { ok: true, data };
-      }
+      const response = message.graphql
+        ? await fetch(GRAPHQL, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json', 'x-csrftoken': csrfToken() },
+            body: JSON.stringify(message.graphql),
+          })
+        : await fetch(message.path, {
+            credentials: 'include',
+            headers: { accept: 'application/json' },
+          });
 
-      const response = await fetch(message.path, {
-        credentials: 'include',
-        headers: { accept: 'application/json' },
-      });
+      const text = await response.text();
 
-      if (response.status === 429) {
-        return { ok: false, status: 429, message: 'LeetCode is rate limiting requests.' };
-      }
-      if (response.status === 403) {
-        return { ok: false, status: 403, message: 'LeetCode session expired — sign in again.' };
-      }
       if (!response.ok) {
-        return { ok: false, status: response.status, message: `LeetCode returned ${response.status}` };
+        const kind = classify(response, text);
+        return {
+          ok: false,
+          kind,
+          status: response.status,
+          message: MESSAGES[kind] || `LeetCode returned ${response.status}`,
+        };
       }
 
-      return { ok: true, data: await response.json() };
+      let body;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        // 200 OK with HTML is the logged-out redirect.
+        return { ok: false, kind: classify(response, text), message: MESSAGES.auth };
+      }
+
+      if (body.errors?.length) {
+        const detail = body.errors[0].message || 'GraphQL error';
+        const kind = /authenticat|permission|login|signin/i.test(detail) ? 'auth' : 'http';
+        return { ok: false, kind, message: kind === 'auth' ? MESSAGES.auth : detail };
+      }
+
+      return { ok: true, data: message.graphql ? body.data : body };
     } catch (error) {
-      return { ok: false, message: error.message || 'LeetCode request failed.' };
+      // A dropped connection is worth retrying, not worth pausing for.
+      return { ok: false, kind: 'throttle', message: error.message || 'LeetCode request failed.' };
     }
   }
 

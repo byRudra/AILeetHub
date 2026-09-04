@@ -20,9 +20,10 @@ import { recordSolve } from './stats.js';
 
 const PAGE_SIZE = 20;
 const SCAN_DELAY = 400;
-const ITEM_DELAY = 250;
+const ITEM_DELAY = 350;
+const MAX_PACE = 8000;
 const GROQ_DELAY = 1200;
-const MAX_RETRIES = 4;
+const MAX_RETRIES = 5;
 const MAX_RECORDED_FAILURES = 50;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,29 +77,71 @@ async function ensureTab() {
   throw new Error('Could not reach a LeetCode tab. Open leetcode.com and make sure you are signed in.');
 }
 
+/** Raised when LeetCode stops recognising the session; pauses instead of failing. */
+class AuthPause extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AuthPause';
+  }
+}
+
 async function leetcode(payload) {
   const id = await ensureTab();
   const result = await chrome.tabs.sendMessage(id, { type: 'LEETCODE_FETCH', ...payload });
   if (!result?.ok) {
+    if (result?.kind === 'auth') throw new AuthPause(result.message);
     const error = new Error(result?.message || 'LeetCode request failed.');
     error.status = result?.status;
+    error.kind = result?.kind;
     throw error;
   }
   return result.data;
 }
 
-/** Retries rate limits with exponential backoff; other errors propagate at once. */
+/**
+ * Pace between LeetCode requests, widened on every throttle and narrowed again
+ * after a clean streak.
+ *
+ * A fixed delay is the wrong tool: LeetCode's tolerance varies by account and time
+ * of day, and being throttled repeatedly is what makes a long import look like the
+ * session keeps dying. Backing off and staying backed off is cheaper than retrying.
+ */
+let pace = ITEM_DELAY;
+let cleanRun = 0;
+
+function slowDown() {
+  pace = Math.min(pace * 2, MAX_PACE);
+  cleanRun = 0;
+}
+
+function speedUp() {
+  cleanRun += 1;
+  // Only ease off after sustained success, and only halfway back.
+  if (cleanRun >= 15 && pace > ITEM_DELAY) {
+    pace = Math.max(ITEM_DELAY, Math.round(pace / 1.5));
+    cleanRun = 0;
+  }
+}
+
+/** Retries throttling with exponential backoff. Auth failures are never retried. */
 async function withRetry(fn) {
-  let delay = 2000;
+  let delay = 5000;
+
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await fn();
+      const value = await fn();
+      speedUp();
+      return value;
     } catch (error) {
-      const retriable = error.status === 429 || error.status === 503;
+      if (error instanceof AuthPause) throw error;
+
+      const retriable = error.kind === 'throttle' || error.status === 429 || error.status === 503;
       if (!retriable || attempt >= MAX_RETRIES) throw error;
-      await setMessage(`Rate limited — waiting ${Math.round(delay / 1000)}s…`);
+
+      slowDown();
+      await setMessage(`Rate limited — waiting ${Math.round(delay / 1000)}s before retrying…`);
       await sleep(delay);
-      delay *= 2;
+      delay = Math.min(delay * 2, 60000);
     }
   }
 }
@@ -189,6 +232,13 @@ export function mergeSubmissionPage(candidates, dump, preferEarliest) {
         timestamp,
         lang: entry.lang,
         title: entry.title,
+        // The dump usually carries the source and timings already. Keeping them
+        // here removes a whole GraphQL round trip per problem in the push phase —
+        // the single biggest cause of throttling on a large history. Absent
+        // fields just mean the push phase fetches them instead.
+        ...(typeof entry.code === 'string' && entry.code ? { code: entry.code } : {}),
+        ...(entry.runtime ? { runtime: String(entry.runtime).trim() } : {}),
+        ...(entry.memory ? { memory: String(entry.memory).trim() } : {}),
       };
     }
   }
@@ -237,7 +287,7 @@ async function scanStep() {
       scanLastKey: data.last_key || null,
       message: `Scanned ${scanned} submissions — found ${Object.keys(candidates).length} solved problems…`,
     });
-    await sleep(SCAN_DELAY);
+    await sleep(Math.max(SCAN_DELAY, pace));
     return;
   }
 
@@ -269,6 +319,8 @@ async function buildQueue(candidates, scanned) {
 /* ---------------------------------------------------------------- push phase */
 
 let cachedAuthor = null;
+/** Branch tip, tracked in memory so each problem costs one fewer round trip. */
+let cachedHead = null;
 
 async function authorFor(token, timestamp) {
   if (!cachedAuthor) cachedAuthor = await github.resolveAuthor(token);
@@ -281,15 +333,22 @@ async function authorFor(token, timestamp) {
 
 /** Rebuilds one historical submission into the same shape a live sync produces. */
 async function loadSubmission(item) {
-  const details = (
-    await withRetry(() =>
-      leetcode({
-        graphql: { query: SUBMISSION_QUERY, variables: { submissionId: Number(item.submissionId) } },
-      }),
-    )
-  )?.submissionDetails;
+  // Only ask for the source when the scan did not already capture it.
+  const details = item.code
+    ? null
+    : (
+        await withRetry(() =>
+          leetcode({
+            graphql: {
+              query: SUBMISSION_QUERY,
+              variables: { submissionId: Number(item.submissionId) },
+            },
+          }),
+        )
+      )?.submissionDetails;
 
-  if (!details?.code) throw new Error('LeetCode did not return the source for this submission.');
+  const code = item.code || details?.code;
+  if (!code) throw new Error('LeetCode did not return the source for this submission.');
 
   const question = (
     await withRetry(() =>
@@ -300,18 +359,18 @@ async function loadSubmission(item) {
   return {
     submissionId: item.submissionId,
     titleSlug: item.slug,
-    title: question?.title || details.question?.title || item.title || item.slug,
-    frontendId: question?.questionFrontendId || details.question?.questionId || '',
-    difficulty: question?.difficulty || details.question?.difficulty || 'Unknown',
+    title: question?.title || details?.question?.title || item.title || item.slug,
+    frontendId: question?.questionFrontendId || details?.question?.questionId || '',
+    difficulty: question?.difficulty || details?.question?.difficulty || 'Unknown',
     topicTags: question?.topicTags || [],
     descriptionHtml: question?.content || '',
-    code: details.code,
-    lang: details.lang?.name || item.lang || 'text',
-    langLabel: details.lang?.verboseName || item.lang || '',
-    runtime: details.runtimeDisplay || '',
-    runtimePercentile: details.runtimePercentile ?? null,
-    memory: details.memoryDisplay || '',
-    memoryPercentile: details.memoryPercentile ?? null,
+    code,
+    lang: details?.lang?.name || item.lang || 'text',
+    langLabel: details?.lang?.verboseName || item.lang || '',
+    runtime: details?.runtimeDisplay || item.runtime || '',
+    runtimePercentile: details?.runtimePercentile ?? null,
+    memory: details?.memoryDisplay || item.memory || '',
+    memoryPercentile: details?.memoryPercentile ?? null,
     problemUrl: `https://leetcode.com/problems/${item.slug}/`,
     // The whole point of backfill: the original solve time, not now.
     solvedAt: item.timestamp * 1000,
@@ -348,7 +407,11 @@ async function pushStep() {
       await sleep(GROQ_DELAY);
     }
 
-    const head = await github.resolveHead(token, owner, repo, branch);
+    // We know where HEAD is after our own commit, so re-reading the ref every
+    // iteration is two wasted calls per problem. It is only resolved when the
+    // cache is cold (first item, or after the worker restarted) or invalidated.
+    const head = cachedHead || (await github.resolveHead(token, owner, repo, branch));
+
     const commit = await github.createCommit(token, {
       owner,
       repo,
@@ -372,6 +435,8 @@ async function pushStep() {
       create: !head.commitSha,
     });
 
+    cachedHead = { commitSha: commit.sha, treeSha: commit.treeSha };
+
     const nextStats = recordSolve(config.stats, submission, {
       dir: paths.dir,
       topic,
@@ -381,6 +446,14 @@ async function pushStep() {
 
     await patch('backfill', { cursor: state.cursor + 1, pushed: state.pushed + 1 });
   } catch (error) {
+    // Losing the LeetCode session is recoverable and affects every remaining
+    // problem, so hold position and let the user sign in rather than marking
+    // hundreds of problems failed.
+    if (error instanceof AuthPause) throw error;
+
+    // Anything that moved the branch underneath us invalidates the cached head.
+    cachedHead = null;
+
     // A bad token or a deleted repo will fail identically for every remaining
     // problem, so stop rather than burning through the queue.
     if (error instanceof github.GitHubError && [401, 403, 404].includes(error.status)) {
@@ -394,7 +467,7 @@ async function pushStep() {
     await patch('backfill', { cursor: state.cursor + 1, failed });
   }
 
-  await sleep(ITEM_DELAY);
+  await sleep(pace);
 }
 
 /** Final commit: refresh the root index once, rather than on every problem. */
@@ -454,11 +527,42 @@ export async function tick() {
       else await pushStep();
     }
   } catch (error) {
+    if (error instanceof AuthPause) {
+      await pauseForAuth(error.message);
+      return;
+    }
     console.error('[AILeetHub] backfill stopped:', error);
     await stop('error', error.message || 'Import failed.');
   } finally {
     running = false;
   }
+}
+
+/**
+ * Holds the run in place when LeetCode stops recognising the session.
+ *
+ * Deliberately not a failure: the cursor does not advance, nothing is marked
+ * failed, and the tab is left open and focused so the user can sign in and press
+ * Resume. On a 600-problem history, treating this as an error would throw away
+ * the entire remaining queue.
+ */
+async function pauseForAuth(message) {
+  const state = await get('backfill');
+
+  if (state.tabId != null) {
+    // Bring the login page to the user rather than failing silently in a
+    // background tab.
+    await chrome.tabs.update(state.tabId, { active: true }).catch(() => {});
+  }
+  await chrome.alarms.clear('ailh-backfill').catch(() => {});
+
+  chrome.action.setBadgeBackgroundColor({ color: '#f5a524' });
+  chrome.action.setBadgeText({ text: '!' });
+
+  await patch('backfill', {
+    status: 'paused',
+    message: message || 'LeetCode session expired — sign in, then resume.',
+  });
 }
 
 export async function start(options = {}) {
@@ -473,7 +577,10 @@ export async function start(options = {}) {
   }
 
   cachedAuthor = null;
+  cachedHead = null;
   tabId = null;
+  pace = ITEM_DELAY;
+  cleanRun = 0;
 
   await patch('backfill', {
     status: 'scanning',
@@ -511,6 +618,12 @@ export async function pause() {
 export async function resume() {
   const state = await get('backfill');
   if (state.status !== 'paused') return { ok: false, message: 'Nothing to resume.' };
+
+  // The branch may have moved while paused, and a paused run is often resumed
+  // after signing in again, so start from a cold cache.
+  cachedHead = null;
+  tabId = null;
+  chrome.action.setBadgeText({ text: '' });
 
   // A paused run keeps its queue and cursor, so this picks up mid-list.
   await patch('backfill', {

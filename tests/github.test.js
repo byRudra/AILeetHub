@@ -71,9 +71,12 @@ test('createCommit sends the backdated author and committer', async () => {
 
   const treeCall = calls.find((call) => call.url.includes('/git/trees'));
   assert.equal(treeCall.body.base_tree, 'tree0');
+  // Content is inlined into the tree: one request per commit instead of one blob
+  // upload per file, which is what keeps a 600-problem import inside rate limits.
   assert.deepEqual(treeCall.body.tree, [
-    { path: files[0].path, mode: '100644', type: 'blob', sha: 'blob1' },
+    { path: files[0].path, mode: '100644', type: 'blob', content: files[0].content },
   ]);
+  assert.equal(calls.some((call) => call.url.includes('/git/blobs')), false);
 
   assert.equal(result.sha, 'commit1');
   assert.equal(result.treeSha, 'tree1');
@@ -161,4 +164,23 @@ test('resolveAuthor falls back to a verified email, then to the noreply address'
 test('a 401 is reported as a token problem, not a generic failure', async () => {
   stubFetch({ '/user': { __status: 401, message: 'Bad credentials' } });
   await assert.rejects(resolveAuthor('tok'), /rejected the token/);
+});
+
+test('an oversized file falls back to a blob upload', async () => {
+  stubFetch({
+    '/git/blobs': { sha: 'bigblob' },
+    '/git/trees': { sha: 'tree1' },
+    '/git/commits': { sha: 'commit1' },
+  });
+
+  const big = { path: 'big.txt', content: 'x'.repeat(500_000) };
+  await createCommit('tok', { owner: 'o', repo: 'r', message: 'm', files: [files[0], big] });
+
+  const treeCall = calls.find((call) => call.url.includes('/git/trees'));
+  const [small, large] = treeCall.body.tree;
+
+  assert.equal(small.content, files[0].content, 'small files stay inline');
+  assert.equal(large.sha, 'bigblob', 'large files are uploaded first');
+  assert.equal('content' in large, false);
+  assert.equal(calls.filter((call) => call.url.includes('/git/blobs')).length, 1);
 });

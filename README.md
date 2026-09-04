@@ -78,6 +78,14 @@ The import is resumable: it survives the service worker being suspended, and *Pa
 *Resume* / *Cancel* work mid-run. Re-running it is safe — problems already in the repo
 are skipped by default.
 
+**If LeetCode signs you out mid-import**, the run pauses and focuses the LeetCode tab
+instead of failing. Sign back in and press *Resume*; it continues from the problem it
+stopped on, with nothing lost and nothing marked failed.
+
+Large histories are paced adaptively: the delay between requests widens whenever
+LeetCode throttles and narrows again after a clean streak, so a 600-problem import
+settles into a rate the account tolerates rather than hammering until it gets blocked.
+
 AI READMEs are **off** for imports by default: hundreds of sequential Groq calls will
 hit rate limits. Turn it on only for a small history.
 

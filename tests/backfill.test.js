@@ -122,3 +122,23 @@ test('live syncs still default to now', () => {
   assert.ok(next.solved.x.syncedAt >= before);
   assert.equal(next.daily[dateKey()], 1);
 });
+
+test('the scan keeps source and timings from the dump when present', () => {
+  const merged = mergeSubmissionPage({}, [
+    dumpEntry({ code: 'print(1)', runtime: ' 52 ms ', memory: '16.4 MB' }),
+  ], true);
+
+  // Carrying these through removes a GraphQL round trip per problem later.
+  assert.equal(merged['two-sum'].code, 'print(1)');
+  assert.equal(merged['two-sum'].runtime, '52 ms', 'whitespace is trimmed');
+  assert.equal(merged['two-sum'].memory, '16.4 MB');
+});
+
+test('the scan omits absent or empty source rather than storing blanks', () => {
+  const merged = mergeSubmissionPage({}, [dumpEntry({ code: '' })], true);
+  assert.equal('code' in merged['two-sum'], false, 'push phase must fetch it instead');
+
+  const plain = mergeSubmissionPage({}, [dumpEntry()], true);
+  assert.equal('code' in plain['two-sum'], false);
+  assert.equal('runtime' in plain['two-sum'], false);
+});
