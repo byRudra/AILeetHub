@@ -127,14 +127,32 @@ function htmlToText(html, limit = 4000) {
 
 const SYSTEM_PROMPT = `You are a senior engineer writing the explanation section of a LeetCode solution README.
 
-Rules:
-- Output GitHub-flavored Markdown only. No preamble, no sign-off, no code fences around the whole response.
+Output rules:
+- GitHub-flavored Markdown only. No preamble, no sign-off, no code fences around the whole response.
 - Start at heading level 2 (##). Never emit an H1.
-- Use exactly these sections, in order: "## Intuition", "## Approach", "## Complexity".
-- Under "## Complexity", give "- **Time:** O(...)" and "- **Space:** O(...)" with one clause of justification each.
-- Describe the algorithm that the provided code actually implements. Do not propose a different solution.
-- Be concise and concrete: aim for 150-250 words total. No filler, no restating the problem statement verbatim.
-- Do not repeat the source code; it already appears elsewhere in the README.`;
+- Use exactly these sections, in order: "## Intuition", "## Approach", "## Dry Run", "## Complexity".
+- Explain the algorithm the provided code actually implements. Never propose a different solution.
+- Do not reproduce the source code; it already appears elsewhere in the README. Short inline references like \`slow = slow.next\` are fine.
+- 350-500 words total. Concrete and specific. Never restate the problem statement.
+
+Intuition (3-5 sentences):
+- Lead with the single observation that makes the solution work - the invariant, property or reframing a reader would need in order to reinvent it. State it as a claim about this problem ("after k iterations fast has moved 2k nodes and slow k, so slow trails at exactly half"), not as the name of a technique.
+- Say what the obvious approach would cost and what this insight removes: an extra pass, a hash map, a sort, a recursion.
+- Name the pattern last, and only if it has a real name (two pointers, monotonic stack, prefix sums, binary search on answer).
+
+Approach (numbered list):
+- Number the steps in the order the code performs them, using the actual variable names from the code.
+- For every loop, state its exit condition and the invariant that holds each iteration.
+- Call out the decisions a reader would otherwise get wrong: empty or single-element input, even vs odd length, duplicates, off-by-one bounds, overflow guards, why a check is \`<=\` and not \`<\`. Where the code picks one of several defensible conventions, say which and why.
+
+Dry Run:
+- Trace one small input end to end. Prefer an example from the problem statement; invent a minimal one (4-6 elements) if the statement has none.
+- State the input on its own line, then a markdown table: one row per iteration, one column per piece of mutable state that matters, and a final short note column explaining what changed.
+- Keep it to at most 8 rows - choose an input small enough to finish - and follow the table with one sentence naming the final state and why it is the answer.
+
+Complexity:
+- Exactly "- **Time:** O(...)" and "- **Space:** O(...)", each with one clause of justification tied to the code ("the loop runs n/2 times because fast advances two nodes").
+- If the space bound excludes the output array or the recursion stack, say so.`;
 
 /**
  * Generates the explanation body for a solution README.
@@ -160,8 +178,8 @@ export async function explainSolution(apiKey, model, submission) {
       model: model || DEFAULT_MODEL,
       temperature: 0.3,
       // Reasoning models spend part of the budget thinking before the answer, so
-      // this is deliberately roomier than the ~250 words the prompt asks for.
-      max_tokens: 2048,
+      // this is deliberately roomier than the ~500 words the prompt asks for.
+      max_tokens: 4096,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userPrompt },

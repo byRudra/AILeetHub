@@ -200,8 +200,8 @@ model is kept marked `(unavailable)` so saving cannot silently switch models.
 
 The picks are reasoning models, so `max_tokens` is roomy (thinking eats budget) and
 `cleanExplanation` strips `<think>` blocks and whole-response fences. The system prompt
-pins the README section structure (`## Intuition`, `## Approach`, `## Complexity`) —
-`readme.js` assumes those headings and owns the H1.
+pins the README section structure (`## Intuition`, `## Approach`, `## Dry Run`,
+`## Complexity`) — `readme.js` assumes those headings and owns the H1.
 
 ## Testing
 
