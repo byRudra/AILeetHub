@@ -6,6 +6,8 @@
  * into the browser profile.
  */
 
+import { DEFAULT_MODEL } from './groq.js';
+
 export const DEFAULTS = {
   github: {
     token: '',
@@ -16,7 +18,7 @@ export const DEFAULTS = {
   },
   groq: {
     apiKey: '',
-    model: 'llama-3.3-70b-versatile',
+    model: DEFAULT_MODEL,
   },
   settings: {
     enabled: true,
@@ -30,6 +32,37 @@ export const DEFAULTS = {
     solved: {},
     // ISO date (YYYY-MM-DD) -> count, used by the popup heatmap and streak.
     daily: {},
+  },
+  /**
+   * Progress of a history import. Persisted (rather than held in memory) because
+   * an MV3 service worker is terminated when idle: the alarm restarts the run and
+   * it resumes from `cursor` instead of starting over.
+   */
+  backfill: {
+    status: 'idle', // idle | scanning | pushing | paused | done | error
+    message: '',
+    // Scan phase: LeetCode's submission dump is paginated by offset + lastKey.
+    scanOffset: 0,
+    scanLastKey: null,
+    scanned: 0,
+    // slug -> { submissionId, timestamp, lang, title }
+    candidates: {},
+    // Push phase: [{ slug, submissionId, timestamp }] sorted oldest first.
+    queue: [],
+    cursor: 0,
+    pushed: 0,
+    skipped: 0,
+    failed: [], // [{ slug, message }]
+    options: {
+      preferEarliest: true, // the submission that first solved it = the real date
+      aiReadme: false, // off by default: hundreds of Groq calls hit rate limits
+      skipExisting: true,
+    },
+    startedAt: 0,
+    finishedAt: 0,
+    // Set when backfill opened its own LeetCode tab, so it can close it again.
+    tabId: null,
+    createdTab: false,
   },
 };
 

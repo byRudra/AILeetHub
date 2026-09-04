@@ -20,11 +20,14 @@ function shiftDays(key, delta) {
 /**
  * Adds (or refreshes) one solved problem. Re-syncing the same problem updates the
  * record in place but still counts as activity for the day.
+ *
+ * `when` (epoch ms) defaults to now for live syncs; backfill passes the original
+ * solve time so imported problems land on the right day of the heatmap.
  */
-export function recordSolve(stats, submission, { dir, topic }) {
+export function recordSolve(stats, submission, { dir, topic, when = Date.now() }) {
   const solved = { ...stats.solved };
   const daily = { ...stats.daily };
-  const key = dateKey();
+  const key = dateKey(new Date(when));
 
   solved[submission.titleSlug] = {
     titleSlug: submission.titleSlug,
@@ -35,7 +38,7 @@ export function recordSolve(stats, submission, { dir, topic }) {
     lang: submission.lang,
     langLabel: submission.langLabel,
     dir,
-    syncedAt: Date.now(),
+    syncedAt: when,
   };
   daily[key] = (daily[key] || 0) + 1;
 

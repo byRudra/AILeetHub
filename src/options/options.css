@@ -228,6 +228,128 @@ option { background: #16161c; }
 .checkbox--inline { align-items: center; }
 .checkbox--inline span { font-size: 13px; }
 
+/* ------------------------------------------------------------ model picker */
+
+.picks { display: grid; gap: 8px; }
+
+.pick {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 11px 13px;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.pick:hover { background: rgba(255, 255, 255, 0.05); }
+
+.pick:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(124, 108, 255, 0.12);
+}
+
+.pick:has(input:focus-visible) { box-shadow: 0 0 0 3px rgba(124, 108, 255, 0.28); }
+
+.pick input { margin: 3px 0 0; accent-color: var(--accent); cursor: pointer; }
+.pick__body { display: grid; gap: 2px; min-width: 0; }
+
+.pick__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 650;
+}
+
+.pick__badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(33, 200, 164, 0.16);
+  border: 1px solid rgba(33, 200, 164, 0.4);
+  color: var(--accent-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.pick__id {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.pick__blurb { font-size: 12px; color: var(--muted); }
+
+#groq-more summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 6px 0;
+}
+
+#groq-more summary:hover { color: var(--text); }
+#groq-more select { width: 100%; margin-top: 8px; }
+
+/* ---------------------------------------------------------------- backfill */
+
+.progress {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.progress__fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.3s ease;
+}
+
+/* Scanning has no known total, so the bar sweeps instead of filling. */
+.progress__fill[data-indeterminate="true"] {
+  width: 35%;
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(285%); }
+}
+
+.progress__text {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.failures {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.failures li { margin-bottom: 4px; }
+.failures code { color: var(--text); }
+
+code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.09);
+  font-size: 0.92em;
+}
+
 .actions {
   display: flex;
   align-items: center;

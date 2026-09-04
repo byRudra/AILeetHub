@@ -9,7 +9,54 @@
 
 const BASE = 'https://api.groq.com/openai/v1';
 
-export const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
+export const DEFAULT_MODEL = 'openai/gpt-oss-120b';
+
+/**
+ * The models offered as one-click picks, best first.
+ *
+ * Matched against the live /models response rather than hard-coded as IDs: Groq
+ * renames and retires models, and a pick that resolves to nothing is hidden instead
+ * of failing at generation time. `preferLatest` takes the highest-sorting match so
+ * a family (Qwen 3.6 / 3.8) resolves to its newest member.
+ */
+export const RECOMMENDED = [
+  {
+    match: /gpt-oss-120b/i,
+    label: 'GPT OSS 120B',
+    blurb: 'Best quality. Strongest reasoning, so complexity analysis is the most reliable.',
+  },
+  {
+    match: /gpt-oss-20b/i,
+    label: 'GPT OSS 20B',
+    blurb: 'Noticeably faster and lighter on rate limits. Good enough for most write-ups.',
+  },
+  {
+    match: /qwen-?3/i,
+    label: 'Qwen 3',
+    blurb: 'Alternative reasoning model — a useful second opinion on tricky solutions.',
+    preferLatest: true,
+  },
+];
+
+/** Resolves RECOMMENDED against a live model list. Pure, so it is testable. */
+export function recommendedModels(models) {
+  const picks = [];
+
+  for (const entry of RECOMMENDED) {
+    const matches = models
+      .filter((model) => entry.match.test(model.id))
+      .filter((model) => !picks.some((pick) => pick.id === model.id));
+    if (!matches.length) continue;
+
+    const chosen = entry.preferLatest
+      ? [...matches].sort((a, b) => a.id.localeCompare(b.id)).at(-1)
+      : matches[0];
+
+    picks.push({ id: chosen.id, label: entry.label, blurb: entry.blurb });
+  }
+
+  return picks;
+}
 
 export class GroqError extends Error {
   constructor(message, status) {
@@ -50,8 +97,8 @@ export async function listModels(apiKey) {
   const body = await request(apiKey, '/models');
   return (body.data || [])
     .filter((model) => model.active !== false)
-    // Whisper/TTS models share the endpoint listing but cannot do chat completion.
-    .filter((model) => !/whisper|tts|guard|prompt-guard/i.test(model.id))
+    // Speech, TTS and moderation models share this listing but cannot write prose.
+    .filter((model) => !/whisper|tts|orpheus|guard|safety|moderation/i.test(model.id))
     .map((model) => ({ id: model.id, owner: model.owned_by, context: model.context_window }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
@@ -112,7 +159,9 @@ export async function explainSolution(apiKey, model, submission) {
     body: JSON.stringify({
       model: model || DEFAULT_MODEL,
       temperature: 0.3,
-      max_tokens: 1024,
+      // Reasoning models spend part of the budget thinking before the answer, so
+      // this is deliberately roomier than the ~250 words the prompt asks for.
+      max_tokens: 2048,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userPrompt },
@@ -123,6 +172,18 @@ export async function explainSolution(apiKey, model, submission) {
   const content = body.choices?.[0]?.message?.content?.trim();
   if (!content) throw new GroqError('Groq returned an empty explanation.', 502);
 
-  // Some models wrap the whole answer in a markdown fence despite the instruction.
-  return content.replace(/^```(?:markdown|md)?\n([\s\S]*)\n```$/m, '$1').trim();
+  return cleanExplanation(content);
+}
+
+/** Strips the two artefacts reasoning models leak into `content`. */
+export function cleanExplanation(content) {
+  return (
+    content
+      // Some reasoning models emit their scratchpad inline instead of in `reasoning`.
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<\/?(?:think|thinking|reasoning)>/gi, '')
+      // Others wrap the whole answer in a fence despite being told not to.
+      .replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n?```\s*$/, '$1')
+      .trim()
+  );
 }

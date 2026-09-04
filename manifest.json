@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AILeetHub",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Push accepted LeetCode solutions to GitHub with Groq-generated README explanations, organized by DSA topic.",
   "minimum_chrome_version": "111",
   "icons": {
@@ -9,7 +9,10 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage"],
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
   "host_permissions": [
     "https://leetcode.com/*",
     "https://api.github.com/*",
@@ -31,16 +34,27 @@
   "options_page": "src/options/options.html",
   "content_scripts": [
     {
-      "matches": ["https://leetcode.com/*"],
-      "js": ["src/content/interceptor.js"],
+      "matches": [
+        "https://leetcode.com/*"
+      ],
+      "js": [
+        "src/content/interceptor.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
     },
     {
-      "matches": ["https://leetcode.com/*"],
-      "js": ["src/content/bridge.js", "src/content/distraction-free.js"],
-      "css": ["src/content/toast.css"],
+      "matches": [
+        "https://leetcode.com/*"
+      ],
+      "js": [
+        "src/content/bridge.js",
+        "src/content/distraction-free.js"
+      ],
+      "css": [
+        "src/content/toast.css"
+      ],
       "run_at": "document_start",
       "world": "ISOLATED",
       "all_frames": false

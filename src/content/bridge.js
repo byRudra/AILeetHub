@@ -60,6 +60,57 @@
       }
     }`;
 
+  /* ------------------------------------------------- LeetCode fetch proxy */
+
+  /**
+   * The service worker cannot call LeetCode directly: the session cookie is
+   * SameSite, so a request from the extension's own origin arrives logged out.
+   * Requests from this content script run in the page's origin and carry it, so
+   * backfill routes every LeetCode call through here.
+   */
+  async function leetcodeFetch(message) {
+    try {
+      if (message.graphql) {
+        const data = await graphql(message.graphql.query, message.graphql.variables);
+        return { ok: true, data };
+      }
+
+      const response = await fetch(message.path, {
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+      });
+
+      if (response.status === 429) {
+        return { ok: false, status: 429, message: 'LeetCode is rate limiting requests.' };
+      }
+      if (response.status === 403) {
+        return { ok: false, status: 403, message: 'LeetCode session expired — sign in again.' };
+      }
+      if (!response.ok) {
+        return { ok: false, status: response.status, message: `LeetCode returned ${response.status}` };
+      }
+
+      return { ok: true, data: await response.json() };
+    } catch (error) {
+      return { ok: false, message: error.message || 'LeetCode request failed.' };
+    }
+  }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    // Used by the service worker to confirm this script is live before backfilling.
+    if (message?.type === 'PING') {
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === 'LEETCODE_FETCH') {
+      leetcodeFetch(message).then(sendResponse);
+      return true;
+    }
+
+    return false;
+  });
+
   function slugFromLocation() {
     const match = location.pathname.match(/\/problems\/([^/]+)/);
     return match ? match[1] : null;

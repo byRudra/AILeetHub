@@ -31,9 +31,11 @@ to touch:
 ```
 LeetCode page (MAIN world)      interceptor.js   patches fetch + XHR
         │ window.postMessage
-LeetCode page (ISOLATED world)  bridge.js        GraphQL enrich + toast UI
+LeetCode page (ISOLATED world)  bridge.js        GraphQL enrich, toast UI,
+        │                                        LeetCode fetch proxy
         │ chrome.runtime.sendMessage
-Service worker (module)         service-worker.js  Groq + GitHub + storage
+Service worker (module)         service-worker.js  live sync
+                                backfill.js        history import
 ```
 
 **Why the split matters:** content scripts never see the GitHub token or Groq key.
@@ -69,10 +71,43 @@ only. Requires the `csrftoken` cookie as an `x-csrftoken` header.
 2. **A root-README index failure must never cost the user their commit either** — same
    pattern, the index file is just dropped from the commit.
 
+### History import (`src/lib/backfill.js`)
+
+Imports already-solved problems, one commit each, **backdated to the original solve
+time**. Four things here are load-bearing:
+
+1. **All LeetCode calls are proxied through a tab.** LeetCode's session cookie is
+   `SameSite`, so a `fetch` from the service worker's origin arrives signed out.
+   `ensureTab()` finds or opens a leetcode.com tab and sends `LEETCODE_FETCH` to
+   `bridge.js`, which performs the request in the page's origin. Do not "simplify" this
+   into a direct fetch — it fails silently with an empty history rather than an error.
+2. **Progress lives in storage, not memory.** An MV3 worker is killed when idle, so
+   `backfill.status` / `cursor` / `queue` are persisted after every problem and a
+   `chrome.alarms` tick restarts `tick()` where it stopped. The `running` module flag
+   keeps two ticks from overlapping.
+3. **The ref moves after every problem**, not once at the end. That costs one API call
+   per problem and buys resumption against real history instead of orphaned commits.
+4. **Backdating is the author date.** `createCommit` sends `author.date`/`committer.date`
+   from the submission timestamp, and `recordSolve` takes `when` so the local heatmap
+   agrees with the repo.
+
+`mergeSubmissionPage` and `orderQueue` are pure and tested — they decide which
+submission represents a problem (first accept = when you solved it) and the
+oldest-first order. Per-problem failures are recorded in `failed` and skipped; only
+401/403/404 from GitHub abort the run, since those would fail identically for every
+remaining item.
+
 ### Repo writes (`src/lib/github.js`)
 
 Writes go through the Git Data API (blob → tree → commit → ref), not repeated
-`PUT /contents` calls, so solution + README + index land as **one** commit. The 404 path
+`PUT /contents` calls, so solution + README + index land as **one** commit. It is split
+into `resolveHead` / `createCommit` / `setRef` so backfill can chain dated commits;
+`commitFiles` is the one-shot wrapper for live syncs.
+
+`resolveAuthor` matters for backfill: GitHub only counts a commit toward the
+contribution graph when the author email belongs to the account, so it prefers the
+public email, then a verified one, then the account's `@users.noreply.github.com`
+address (which is account-bound and still counts). The 404 path
 on `git/ref/heads/<branch>` means an empty repo and creates the ref instead of patching
 it. `toBase64` chunks its input — `btoa(String.fromCharCode(...bytes))` blows the
 argument limit on large files.
@@ -94,7 +129,7 @@ accepts but Windows cannot check out.
 
 ### State (`src/lib/storage.js`)
 
-Four keys in `chrome.storage.local`: `github`, `groq`, `settings`, `stats`. Never
+Five keys in `chrome.storage.local`: `github`, `groq`, `settings`, `stats`, `backfill`. Never
 `chrome.storage.sync` — it would replicate the GitHub token and Groq key to every
 machine on the browser profile. `getState()` merges stored values over `DEFAULTS`, so
 new settings keys appear on upgrade without a migration.
@@ -116,15 +151,30 @@ CSP forbids inline scripts and remote resources on extension pages: no CDN, no i
 ## Groq specifics
 
 Groq is OpenAI-compatible at `https://api.groq.com/openai/v1`. Model IDs are retired
-often, so the options page fetches `/models` live rather than hard-coding a menu;
-`DEFAULT_MODEL` only seeds a fresh install. A saved-but-delisted model is kept in the
-dropdown marked `(unavailable)` so saving cannot silently switch models. The system
-prompt pins the README section structure (`## Intuition`, `## Approach`, `## Complexity`)
-— `readme.js` assumes those headings and owns the H1.
+often, so nothing hard-codes a menu: `RECOMMENDED` holds regex matchers plus copy, and
+`recommendedModels()` resolves them against the live `/models` response, dropping picks
+that match nothing and taking the highest-sorting match for a family (`preferLatest`).
+The options page shows the top three as radio cards with the full list behind a
+disclosure; the `<select>` remains the single source of truth and the radios just set it.
+
+`DEFAULT_MODEL` (`openai/gpt-oss-120b`) only seeds a fresh install. A saved-but-delisted
+model is kept marked `(unavailable)` so saving cannot silently switch models.
+
+The picks are reasoning models, so `max_tokens` is roomy (thinking eats budget) and
+`cleanExplanation` strips `<think>` blocks and whole-response fences. The system prompt
+pins the README section structure (`## Intuition`, `## Approach`, `## Complexity`) —
+`readme.js` assumes those headings and owns the H1.
 
 ## Testing
 
-`tests/logic.test.js` covers the pure modules (`topics`, `readme`, `stats`, base64).
-`tests/manifest.test.js` asserts every manifest-referenced path exists, versions agree,
-world assignments are right, and no `web_accessible_resources` leak. Anything touching
-`chrome.*` or the network is untested — verify those by loading the extension.
+- `logic.test.js` — pure modules (`topics`, `readme`, `stats`, base64)
+- `backfill.test.js` — submission selection, queue ordering, historical dating
+- `github.test.js` — request bodies against a stubbed `globalThis.fetch`; this is what
+  pins the backdating, since a wrong author date is invisible until commits land on the
+  wrong day
+- `groq.test.js` — model ranking and response cleanup
+- `manifest.test.js` — every referenced path exists, versions agree, world assignments
+  are right, no `web_accessible_resources` leak
+
+Anything touching `chrome.*` (tab proxying, alarms, storage) is untested — verify by
+loading the extension.

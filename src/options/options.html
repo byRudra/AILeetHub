@@ -79,11 +79,17 @@
           </p>
         </label>
 
-        <label class="field">
+        <div class="field">
           <span class="field__label">Model</span>
-          <select id="groq-model"></select>
-          <p class="hint">Verify the key to load the live model list from Groq.</p>
-        </label>
+          <div id="groq-picks" class="picks">
+            <p class="hint">Verify the key to load the live model list from Groq.</p>
+          </div>
+
+          <details id="groq-more">
+            <summary>Use a different model</summary>
+            <select id="groq-model"></select>
+          </details>
+        </div>
       </section>
 
       <!-- 3. Preferences -->
@@ -120,6 +126,65 @@
             <option value="flat">Flat — 0322-coin-change/</option>
           </select>
         </label>
+      </section>
+
+      <!-- 4. Backfill -->
+      <section class="card">
+        <div class="card__head">
+          <h2><span class="step">4</span> Import past solutions</h2>
+          <span id="backfill-state" class="pill">Idle</span>
+        </div>
+
+        <p class="hint">
+          Walks your LeetCode submission history and commits every solved problem, each
+          one <strong>backdated to the moment you actually solved it</strong>. Sign in to
+          LeetCode first — the import reads your history through an open leetcode.com tab.
+        </p>
+
+        <label class="field">
+          <span class="field__label">Which submission to import</span>
+          <select id="backfill-prefer">
+            <option value="earliest">First accepted — the date you actually solved it</option>
+            <option value="latest">Most recent accepted — your latest code</option>
+          </select>
+        </label>
+
+        <label class="checkbox">
+          <input id="backfill-skip" type="checkbox" checked />
+          <span><strong>Skip problems already in the repo</strong><em>Safe to re-run — nothing gets committed twice.</em></span>
+        </label>
+
+        <label class="checkbox">
+          <input id="backfill-ai" type="checkbox" />
+          <span><strong>Write AI READMEs while importing</strong><em>Much slower, and hundreds of calls will hit Groq's rate limit. Off by default.</em></span>
+        </label>
+
+        <div id="backfill-progress" hidden>
+          <div class="progress">
+            <div class="progress__fill" id="backfill-fill"></div>
+          </div>
+          <p class="progress__text" id="backfill-message"></p>
+        </div>
+
+        <details id="backfill-failures" hidden>
+          <summary>Problems that could not be imported</summary>
+          <ul class="failures" id="backfill-failure-list"></ul>
+        </details>
+
+        <div class="field__row">
+          <button id="backfill-start" class="btn btn--primary" type="button">Start import</button>
+          <button id="backfill-pause" class="btn" type="button" hidden>Pause</button>
+          <button id="backfill-resume" class="btn" type="button" hidden>Resume</button>
+          <button id="backfill-cancel" class="btn" type="button" hidden>Cancel</button>
+        </div>
+
+        <p class="hint">
+          <strong>About the contribution graph:</strong> GitHub only counts a backdated
+          commit if its author email belongs to your account, and the repo is public (or
+          private contributions are enabled in your profile). AILeetHub uses your account's
+          verified email, falling back to your <code>@users.noreply.github.com</code>
+          address — both count.
+        </p>
       </section>
 
       <footer class="actions">

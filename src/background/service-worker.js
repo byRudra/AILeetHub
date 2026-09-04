@@ -10,10 +10,21 @@ import { explainSolution } from '../lib/groq.js';
 import { buildProblemReadme, buildRootReadme, commitMessage } from '../lib/readme.js';
 import { pathFor, primaryTopic } from '../lib/topics.js';
 import { recordSolve } from '../lib/stats.js';
+import * as backfill from '../lib/backfill.js';
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') chrome.runtime.openOptionsPage();
 });
+
+/**
+ * A history import outlives this worker: the alarm wakes it back up and tick()
+ * resumes from the cursor stored in chrome.storage.
+ */
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'ailh-backfill') backfill.tick();
+});
+
+chrome.runtime.onStartup.addListener(() => backfill.tick());
 
 function flashBadge(text, color) {
   chrome.action.setBadgeBackgroundColor({ color });
@@ -99,6 +110,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     getState().then((state) => {
       sendResponse({ enabled: state.settings.enabled && isConfigured(state) });
     });
+    return true;
+  }
+
+  const backfillActions = {
+    BACKFILL_START: () => backfill.start(message.options),
+    BACKFILL_PAUSE: () => backfill.pause(),
+    BACKFILL_RESUME: () => backfill.resume(),
+    BACKFILL_CANCEL: () => backfill.cancel(),
+  };
+
+  if (backfillActions[message?.type]) {
+    backfillActions[message.type]()
+      .catch((error) => ({ ok: false, message: error.message || 'Import failed.' }))
+      .then(sendResponse);
     return true;
   }
 

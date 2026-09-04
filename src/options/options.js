@@ -4,9 +4,9 @@
  * routing verification through the service worker.
  */
 
-import { getState, patch } from '../lib/storage.js';
+import { getState, patch, DEFAULTS } from '../lib/storage.js';
 import * as github from '../lib/github.js';
-import { listModels, DEFAULT_MODEL } from '../lib/groq.js';
+import { listModels, recommendedModels, DEFAULT_MODEL } from '../lib/groq.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -24,6 +24,8 @@ const els = {
   groqVerify: $('groq-verify'),
   groqState: $('groq-state'),
   groqModel: $('groq-model'),
+  groqPicks: $('groq-picks'),
+  groqMore: $('groq-more'),
   prefEnabled: $('pref-enabled'),
   prefAi: $('pref-ai'),
   prefIndex: $('pref-index'),
@@ -31,6 +33,19 @@ const els = {
   prefFolder: $('pref-folder'),
   save: $('save'),
   status: $('status'),
+  backfillState: $('backfill-state'),
+  backfillPrefer: $('backfill-prefer'),
+  backfillSkip: $('backfill-skip'),
+  backfillAi: $('backfill-ai'),
+  backfillProgress: $('backfill-progress'),
+  backfillFill: $('backfill-fill'),
+  backfillMessage: $('backfill-message'),
+  backfillFailures: $('backfill-failures'),
+  backfillFailureList: $('backfill-failure-list'),
+  backfillStart: $('backfill-start'),
+  backfillPause: $('backfill-pause'),
+  backfillResume: $('backfill-resume'),
+  backfillCancel: $('backfill-cancel'),
 };
 
 let repos = [];
@@ -103,8 +118,77 @@ async function connectGitHub(token, { silent = false } = {}) {
   if (!silent) setStatus(`Connected as @${user.login}.`, 'ok');
 }
 
+/**
+ * Renders the top-3 quick picks. The <select> below stays the single source of
+ * truth for the chosen model; these radios just drive it.
+ */
+function renderModelPicks(models, selected) {
+  const picks = recommendedModels(models);
+  els.groqPicks.textContent = '';
+
+  if (!picks.length) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'No recommended models in this account — choose one below.';
+    els.groqPicks.append(hint);
+    els.groqMore.open = true;
+    return;
+  }
+
+  picks.forEach((pick, index) => {
+    const label = document.createElement('label');
+    label.className = 'pick';
+
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'groq-pick';
+    radio.value = pick.id;
+    radio.checked = pick.id === selected;
+    radio.addEventListener('change', () => {
+      els.groqModel.value = pick.id;
+    });
+
+    const body = document.createElement('div');
+    body.className = 'pick__body';
+
+    const title = document.createElement('div');
+    title.className = 'pick__title';
+    title.append(pick.label);
+    if (index === 0) {
+      const badge = document.createElement('span');
+      badge.className = 'pick__badge';
+      badge.textContent = 'Recommended';
+      title.append(badge);
+    }
+
+    const id = document.createElement('div');
+    id.className = 'pick__id';
+    id.textContent = pick.id;
+
+    const blurb = document.createElement('div');
+    blurb.className = 'pick__blurb';
+    blurb.textContent = pick.blurb;
+
+    body.append(title, id, blurb);
+    label.append(radio, body);
+    els.groqPicks.append(label);
+  });
+
+  // A model picked from the full list is not one of the three: show why nothing
+  // is highlighted by leaving the disclosure open.
+  els.groqMore.open = !picks.some((pick) => pick.id === selected);
+}
+
+/** Keeps the radios in step when the model is changed from the full list. */
+function syncPicksTo(modelId) {
+  for (const radio of els.groqPicks.querySelectorAll('input[type="radio"]')) {
+    radio.checked = radio.value === modelId;
+  }
+}
+
 async function loadGroqModels(apiKey, selected) {
   const models = await listModels(apiKey);
+
   els.groqModel.innerHTML = '';
   for (const model of models) {
     els.groqModel.append(new Option(model.id, model.id));
@@ -114,7 +198,16 @@ async function loadGroqModels(apiKey, selected) {
   if (selected && !models.some((model) => model.id === selected)) {
     els.groqModel.append(new Option(`${selected} (unavailable)`, selected));
   }
-  els.groqModel.value = selected || DEFAULT_MODEL;
+
+  const picks = recommendedModels(models);
+  // A fresh install has never chosen a model; start it on the best available one.
+  const resolved =
+    selected && (models.some((model) => model.id === selected) || selected !== DEFAULT_MODEL)
+      ? selected
+      : picks[0]?.id || models[0]?.id || DEFAULT_MODEL;
+
+  els.groqModel.value = resolved;
+  renderModelPicks(models, resolved);
   return models.length;
 }
 
@@ -129,6 +222,11 @@ async function restore() {
   els.prefIndex.checked = state.settings.updateIndex;
   els.prefFocus.checked = state.settings.focusMode;
   els.prefFolder.value = state.settings.folderStyle;
+
+  els.backfillPrefer.value = state.backfill.options.preferEarliest ? 'earliest' : 'latest';
+  els.backfillSkip.checked = state.backfill.options.skipExisting;
+  els.backfillAi.checked = state.backfill.options.aiReadme;
+  renderBackfill(state.backfill);
 
   // Offer the saved model immediately; the full list arrives once the key verifies.
   els.groqModel.append(new Option(state.groq.model, state.groq.model));
@@ -228,6 +326,99 @@ els.groqVerify.addEventListener(
   }),
 );
 
+els.groqModel.addEventListener('change', () => syncPicksTo(els.groqModel.value));
+
 els.save.addEventListener('click', withBusy(els.save, 'Saving…', save));
+
+/* ---------------------------------------------------------------- backfill */
+
+const BACKFILL_PILL = {
+  idle: ['Idle', null],
+  scanning: ['Scanning…', 'busy'],
+  pushing: ['Importing…', 'busy'],
+  paused: ['Paused', 'busy'],
+  done: ['Finished', 'ok'],
+  error: ['Failed', 'error'],
+};
+
+function renderBackfill(backfill) {
+  const [label, pillState] = BACKFILL_PILL[backfill.status] || BACKFILL_PILL.idle;
+  setPill(els.backfillState, label, pillState);
+
+  const active = backfill.status === 'scanning' || backfill.status === 'pushing';
+  const paused = backfill.status === 'paused';
+
+  els.backfillStart.hidden = active || paused;
+  els.backfillStart.textContent = backfill.status === 'done' ? 'Import again' : 'Start import';
+  els.backfillPause.hidden = !active;
+  els.backfillResume.hidden = !paused;
+  els.backfillCancel.hidden = !active && !paused;
+
+  // Options are baked into a run when it starts; freeze them while it is going.
+  for (const input of [els.backfillPrefer, els.backfillSkip, els.backfillAi]) {
+    input.disabled = active || paused;
+  }
+
+  els.backfillProgress.hidden = backfill.status === 'idle';
+
+  const scanning = backfill.status === 'scanning';
+  els.backfillFill.dataset.indeterminate = String(scanning);
+  if (!scanning) {
+    const total = backfill.queue.length;
+    const done = backfill.status === 'done' ? total : backfill.cursor;
+    els.backfillFill.style.width = total ? `${(done / total) * 100}%` : '100%';
+  } else {
+    els.backfillFill.style.removeProperty('width');
+  }
+
+  const counts = [
+    backfill.pushed ? `${backfill.pushed} imported` : null,
+    backfill.skipped ? `${backfill.skipped} skipped` : null,
+    backfill.failed.length ? `${backfill.failed.length} failed` : null,
+  ].filter(Boolean);
+
+  els.backfillMessage.textContent = [backfill.message, counts.join(' · ')]
+    .filter(Boolean)
+    .join(' — ');
+
+  els.backfillFailures.hidden = backfill.failed.length === 0;
+  els.backfillFailureList.textContent = '';
+  for (const failure of backfill.failed) {
+    const item = document.createElement('li');
+    const slug = document.createElement('code');
+    slug.textContent = failure.slug;
+    item.append(slug, ` — ${failure.message}`);
+    els.backfillFailureList.append(item);
+  }
+}
+
+async function sendBackfill(type, options) {
+  const result = await chrome.runtime.sendMessage({ type, options });
+  if (!result?.ok) throw new Error(result?.message || 'Import command failed.');
+  return result;
+}
+
+els.backfillStart.addEventListener(
+  'click',
+  withBusy(els.backfillStart, 'Starting…', async () => {
+    // The run reads settings from storage, so persist any unsaved edits first.
+    await save();
+    await sendBackfill('BACKFILL_START', {
+      preferEarliest: els.backfillPrefer.value === 'earliest',
+      skipExisting: els.backfillSkip.checked,
+      aiReadme: els.backfillAi.checked,
+    });
+  }),
+);
+
+els.backfillPause.addEventListener('click', () => sendBackfill('BACKFILL_PAUSE').catch(() => {}));
+els.backfillResume.addEventListener('click', () => sendBackfill('BACKFILL_RESUME').catch(() => {}));
+els.backfillCancel.addEventListener('click', () => sendBackfill('BACKFILL_CANCEL').catch(() => {}));
+
+// The import runs in the service worker; this mirrors its progress live.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.backfill) return;
+  renderBackfill({ ...DEFAULTS.backfill, ...changes.backfill.newValue });
+});
 
 restore();

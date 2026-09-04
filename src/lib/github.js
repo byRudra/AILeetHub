@@ -108,6 +108,40 @@ export function getRepo(token, owner, repo) {
   return request(token, `/repos/${owner}/${repo}`);
 }
 
+/**
+ * Identity to stamp on commits.
+ *
+ * This matters for backfill: GitHub only counts a commit toward the contribution
+ * graph when the author email belongs to the account. A private profile hides
+ * user.email and /user/emails needs an extra scope, so the account's noreply
+ * address is the fallback — it is bound to the account by definition and still
+ * counts.
+ */
+export async function resolveAuthor(token) {
+  const user = await getUser(token);
+
+  let email = user.email;
+  if (!email) {
+    try {
+      const emails = await request(token, '/user/emails');
+      const chosen =
+        emails.find((entry) => entry.primary && entry.verified) ||
+        emails.find((entry) => entry.verified);
+      email = chosen?.email;
+    } catch {
+      // Token lacks the email scope; fall through to the noreply address.
+    }
+  }
+
+  return {
+    name: user.name || user.login,
+    email: email || `${user.id}+${user.login}@users.noreply.github.com`,
+    login: user.login,
+    // True when we had to guess; the UI warns that graph credit depends on it.
+    inferredEmail: !user.email,
+  };
+}
+
 /** Returns the file's decoded text, or null when it does not exist yet. */
 export async function getFileText(token, owner, repo, path, branch) {
   try {
@@ -127,30 +161,32 @@ function encodePath(path) {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
-/**
- * Commits several files at once.
- *
- * @param {Array<{path: string, content: string}>} files
- * @returns {Promise<{sha: string, htmlUrl: string}>}
- */
-export async function commitFiles(token, { owner, repo, branch, message, files }) {
-  const ref = `heads/${branch}`;
-
-  let baseCommitSha = null;
+/** Current tip of a branch, or nulls when the branch has no commits yet. */
+export async function resolveHead(token, owner, repo, branch) {
   try {
-    const refData = await request(token, `/repos/${owner}/${repo}/git/ref/${ref}`);
-    baseCommitSha = refData.object.sha;
+    const ref = await request(token, `/repos/${owner}/${repo}/git/ref/heads/${branch}`);
+    const commit = await request(token, `/repos/${owner}/${repo}/git/commits/${ref.object.sha}`);
+    return { commitSha: ref.object.sha, treeSha: commit.tree.sha };
   } catch (error) {
-    // 404 here means the branch has no commits yet (empty repo, or a new branch).
-    if (error.status !== 404 && error.status !== 409) throw error;
+    // 404/409 means an empty repo or a branch that does not exist yet.
+    if (error.status === 404 || error.status === 409) return { commitSha: null, treeSha: null };
+    throw error;
   }
+}
 
-  let baseTreeSha;
-  if (baseCommitSha) {
-    const baseCommit = await request(token, `/repos/${owner}/${repo}/git/commits/${baseCommitSha}`);
-    baseTreeSha = baseCommit.tree.sha;
-  }
-
+/**
+ * Creates a commit object without moving any ref.
+ *
+ * @param {object} options
+ * @param {Array<{path: string, content: string}>} options.files
+ * @param {{name: string, email: string, date?: string}} [options.author]
+ *   `date` is ISO 8601. GitHub's contribution graph reads the author date, which is
+ *   what lets backfilled solutions land on the day they were originally solved.
+ */
+export async function createCommit(
+  token,
+  { owner, repo, message, files, author, parentSha, baseTreeSha },
+) {
   const blobs = await Promise.all(
     files.map((file) =>
       request(token, `/repos/${owner}/${repo}/git/blobs`, {
@@ -178,24 +214,52 @@ export async function commitFiles(token, { owner, repo, branch, message, files }
     body: JSON.stringify({
       message,
       tree: tree.sha,
-      parents: baseCommitSha ? [baseCommitSha] : [],
+      parents: parentSha ? [parentSha] : [],
+      // Both dates are set: the graph uses the author date, but a matching
+      // committer date keeps `git log` from looking inconsistent.
+      ...(author ? { author, committer: author } : {}),
     }),
   });
 
-  if (baseCommitSha) {
-    await request(token, `/repos/${owner}/${repo}/git/refs/${ref}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ sha: commit.sha }),
-    });
-  } else {
-    await request(token, `/repos/${owner}/${repo}/git/refs`, {
+  return { sha: commit.sha, treeSha: tree.sha };
+}
+
+export async function setRef(token, { owner, repo, branch, sha, create, force = false }) {
+  const path = `/repos/${owner}/${repo}/git`;
+  if (create) {
+    return request(token, `${path}/refs`, {
       method: 'POST',
-      body: JSON.stringify({ ref: `refs/${ref}`, sha: commit.sha }),
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
     });
   }
+  return request(token, `${path}/refs/heads/${branch}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ sha, force }),
+  });
+}
 
-  return {
-    sha: commit.sha,
-    htmlUrl: `https://github.com/${owner}/${repo}/commit/${commit.sha}`,
-  };
+export function commitUrl(owner, repo, sha) {
+  return `https://github.com/${owner}/${repo}/commit/${sha}`;
+}
+
+/**
+ * Resolve HEAD, commit, move the branch. The one-shot path used by live syncs;
+ * backfill drives resolveHead/createCommit/setRef itself so it can chain commits.
+ */
+export async function commitFiles(token, { owner, repo, branch, message, files, author }) {
+  const head = await resolveHead(token, owner, repo, branch);
+
+  const commit = await createCommit(token, {
+    owner,
+    repo,
+    message,
+    files,
+    author,
+    parentSha: head.commitSha,
+    baseTreeSha: head.treeSha,
+  });
+
+  await setRef(token, { owner, repo, branch, sha: commit.sha, create: !head.commitSha });
+
+  return { sha: commit.sha, treeSha: commit.treeSha, htmlUrl: commitUrl(owner, repo, commit.sha) };
 }
