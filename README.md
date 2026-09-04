@@ -1,7 +1,16 @@
 # AILeetHub
 
+[![Manifest V3](https://img.shields.io/badge/manifest-v3-blue)](manifest.json)
+[![Chrome 111+](https://img.shields.io/badge/chrome-111%2B-brightgreen)](https://www.google.com/chrome/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-node%3Atest-orange)](tests)
+
 Chrome extension that pushes your accepted LeetCode solutions to a GitHub repository,
 organised by DSA topic, with a README written by **Groq**.
+
+Solve a problem, get **Accepted**, and AILeetHub does the rest: a solution file, an
+AI-written explanation, and an updated repo index — all landing as a single commit,
+with zero manual copy-pasting.
 
 - **One commit per accepted submission** — solution file, problem README, and the
   repo index all land in a single commit.
@@ -17,12 +26,45 @@ organised by DSA topic, with a README written by **Groq**.
 Tokens and API keys are stored in `chrome.storage.local` on your machine only. The
 extension talks to exactly three hosts: `leetcode.com`, `api.github.com`, `api.groq.com`.
 
+## Contents
+
+- [Screenshots & demo](#screenshots--demo)
+- [Install](#install)
+- [Setup](#setup)
+- [Import your past solutions](#import-your-past-solutions)
+- [What gets committed](#what-gets-committed)
+- [Development](#development)
+- [Known limitations](#known-limitations)
+- [License](#license)
+
+## Screenshots & demo
+
+<!--
+  Filenames match screenshots/README.md exactly — drop the real captures in
+  and these render automatically, no other edits needed.
+-->
+
+| Live sync | Dashboard |
+| --- | --- |
+| ![Accepted toast with commit link](screenshots/sync-toast.gif) | ![Popup dashboard: streak, heatmap, recent syncs](screenshots/popup-dashboard.png) |
+
+| GitHub setup | Groq model picker |
+| --- | --- |
+| ![Options page GitHub panel](screenshots/options-github.png) | ![Options page Groq panel](screenshots/options-groq.png) |
+
+| History import | Generated problem README |
+| --- | --- |
+| ![Backfill progress bar with pause/resume](screenshots/backfill-progress.gif) | ![AI-written README with Intuition, Approach, Complexity](screenshots/problem-readme.png) |
+
+> Capturing your own? See [`screenshots/README.md`](screenshots/README.md) for the
+> exact filenames and a couple of tools that make this quick on Windows.
+
 ## Install
 
 No build step — the repository *is* the extension.
 
 ```bash
-git clone <this repo>
+git clone https://github.com/byRudra/AILeetHub.git
 cd AILeetHub
 npm run icons        # only needed if icons/ is missing
 ```
@@ -128,3 +170,7 @@ not reload content scripts — refresh the LeetCode tab too.
 - Focus-mode selectors target LeetCode's stable hooks, not its generated class names,
   so some upsell surfaces may survive.
 - Groq failures never block a push — the solution is committed with a template README.
+
+## License
+
+[MIT](LICENSE)
